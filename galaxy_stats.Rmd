@@ -1,0 +1,71 @@
+---
+title: "Galaxy Stats"
+output: html_document
+---
+
+```{r}
+# install.packages("RPostgreSQL")
+# install.packages("lubridate")
+library("RPostgreSQL")
+library("dplyr")
+library("stringr")
+library("lubridate")
+library("ggplot2")
+```
+
+Load driver and create a connection.
+
+```{r}
+drv <- dbDriver("PostgreSQL")
+con <- dbConnect(drv, dbname = "galaxy", host = "localhost", port = 5950,
+                 user = "ubuntu")
+````
+
+## Get data
+
+Get and store user data.
+
+```{r}
+# dbGetQuery(con, "SELECT * FROM galaxy_user LIMIT 5;")
+users <- dbGetQuery(con, "SELECT * FROM galaxy_user;") %>%
+  select(id:email, username, disk_usage)
+```
+
+Get and store job data.
+
+```{r}
+# dbGetQuery(con, "SELECT * FROM job LIMIT 5;")
+cmd <- paste0("SELECT id, create_time, update_time, history_id, tool_id, ",
+              "tool_version, state, command_line FROM job;")
+jobs <- dbGetQuery(con, cmd)
+```
+
+## User analysis
+
+New users per month.
+
+```{r}
+
+```
+
+Analysis of email suffixes.
+
+```{r}
+
+```
+
+## Job analysis
+
+Jobs run per month.
+
+```{r}
+
+```
+
+-----
+
+# Session Info
+
+```{r}
+devtools::session_info()
+```
