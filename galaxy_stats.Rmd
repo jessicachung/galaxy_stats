@@ -13,11 +13,17 @@ library("lubridate")
 library("ggplot2")
 ```
 
+```{r}
+year_month <- function(date) {
+  return(sprintf("%d-%02d", year(date), month(date)))
+}
+```
+
 Load driver and create a connection.
 
 ```{r}
 drv <- dbDriver("PostgreSQL")
-con <- dbConnect(drv, dbname = "galaxy", host = "localhost", port = 5950,
+con <- dbConnect(drv, dbname = "galaxy", host = "localhost", port = 5930,
                  user = "ubuntu")
 ````
 
@@ -27,7 +33,7 @@ Get and store user data.
 
 ```{r}
 # dbGetQuery(con, "SELECT * FROM galaxy_user LIMIT 5;")
-users <- dbGetQuery(con, "SELECT * FROM galaxy_user;") %>%
+users <- dbGetQuery(con, "SELECT * FROM galaxy_user;") %>% 
   select(id:email, username, disk_usage)
 ```
 
@@ -37,7 +43,7 @@ Get and store job data.
 # dbGetQuery(con, "SELECT * FROM job LIMIT 5;")
 cmd <- paste0("SELECT id, create_time, update_time, history_id, tool_id, ",
               "tool_version, state, command_line FROM job;")
-jobs <- dbGetQuery(con, cmd)
+all_jobs <- dbGetQuery(con, cmd)
 ```
 
 ## User analysis
@@ -45,21 +51,173 @@ jobs <- dbGetQuery(con, cmd)
 New users per month.
 
 ```{r}
+# Create new column with year-month
+users <- users %>% 
+  mutate(month=year_month(create_time))
 
+# Get number of new users per year-month
+users %>%
+  group_by(month) %>% 
+  summarize(n=n())
+```
+
+```{r include=FALSE}
+# ggplot(users, aes(x=create_time %>% date)) +
+#   geom_histogram(bins=20) +
+#   scale_x_date(date_breaks="3 months") +
+#   labs(x="date", y="new users")
+# 
+# ggplot(users, aes(x=create_time %>% ymd_hms)) +
+#   geom_density()
+```
+
+```{r}
+ggplot(users, aes(x=month)) + 
+  geom_bar(alpha=0.8) +
+  labs(x="date", y="new users")
 ```
 
 Analysis of email suffixes.
 
 ```{r}
+# Most common domains
+email_suffixes <- users$email %>% str_split("@") %>% sapply(function(x) x[2])
+email_suffixes %>% table %>% 
+  data.frame %>% setNames(c("domain", "freq")) %>%
+  arrange(desc(freq)) %>% head(20)
+```
 
+```{r}
+# Country codes
+country_codes <- email_suffixes %>% str_split("\\.") %>% 
+  sapply(function(x) {x[length(x)]})
+country_codes %>% table %>% 
+  data.frame %>% setNames(c("country_codes", "freq")) %>%
+  arrange(desc(freq)) %>% head(10)
+```
+
+```{r}
+# edu domains
+edu_addresses <- email_suffixes %>% str_split("\\.") %>% 
+  sapply(function(x) {"edu" %in% x}) %>% email_suffixes[.]
+edu_addresses %>% table %>% 
+  data.frame %>% setNames(c("domain", "freq")) %>%
+  arrange(desc(freq)) %>% head(20)
 ```
 
 ## Job analysis
 
+Remove jobs that occurred before the first user creation (Not sure why some jobs have incorrect timestamps).
+
+```{r}
+earliest_user <- users$create_time %>% sort %>% .[1]
+earliest_user
+```
+
+```{r}
+# Check if date is before earliest user
+all_jobs <- all_jobs %>% mutate(ok_date=create_time > earliest_user)
+
+# Filter out bad dates
+jobs <- all_jobs %>% filter(ok_date)
+
+# How many dates are ok vs not ok?
+all_jobs$ok_date %>% table
+```
+
+```{r include=FALSE, eval=FALSE}
+# Why are there dates that are before the earliest created user?
+# Are these jobs uniformly distributed or is there a pattern?
+ggplot(all_jobs, aes(x=id, y=ok_date)) + geom_point(size=0.1)
+# Looks like they're clusted in some areas
+
+# The jobs with incorrect dates seem to be from the same 4 tools
+not_ok$tool_id %>% table
+
+# But only sometimes for filtering and uploading, and always for bwa and
+# freebayes
+tool_subset <- not_ok$tool_id %>% unique
+all_jobs %>% filter(tool_id %in% tool_subset) %>% group_by(tool_id) %>%
+  summarize(n=n(), ok=sum(ok_date), not_ok=sum(!ok_date))
+
+# Rename tool_ids of bwa and freebayes
+not_ok <- not_ok %>% mutate(
+  tool_id=ifelse(tool_id == "toolshed.g2.bx.psu.edu/repos/devteam/bwa/bwa/0.3.1",
+                 "bwa-0.3.1", tool_id),
+  tool_id=ifelse(tool_id == "toolshed.g2.bx.psu.edu/repos/devteam/freebayes/freebayes/0.3",
+                 "freebayes-0.3", tool_id))
+  
+# Is there a tool order pattern? Is it one particular tool which triggers it?
+ggplot(not_ok %>% head(100), aes(x=id, y=tool_id)) +
+  geom_point(size=0.1)
+
+# Looks like bwa -> freebayes -> filter is the culprit for most of them
+not_ok %>% arrange(id) %>% select(id:tool_id) %>% head(10)
+```
+
 Jobs run per month.
 
 ```{r}
+# Create new column with year-month
+jobs <- jobs %>% 
+  mutate(month=year_month(create_time))
 
+# Get number of jobs run per year-month
+jobs %>%
+  group_by(month) %>% 
+  summarize(n=n())
+```
+
+```{r include=FALSE}
+# ggplot(jobs, aes(x=create_time %>% date)) +
+#   geom_histogram(bins=20) +
+#   scale_x_date(date_breaks="3 months") +
+#   labs(x="date", y="jobs")
+# 
+# ggplot(jobs, aes(x=create_time %>% ymd_hms)) +
+#   geom_density()
+```
+
+```{r}
+ggplot(jobs, aes(x=month)) + 
+  geom_bar(alpha=0.8) +
+  labs(x="date", y="number of jobs")
+```
+
+## Tool analysis
+
+Which tools are used most often?
+
+```{r}
+# Using all jobs across all dates
+all_tool_ids <- all_jobs$tool_id
+tool_data <- all_tool_ids %>% str_split("/")
+tool_names <- sapply(tool_data, function(x) {ifelse(length(x) == 1, x, x[5])})
+
+# Top 20 used tools
+tool_names %>% table %>% data.frame %>% setNames(c("tool", "freq")) %>%
+  arrange(desc(freq)) %>% head(20)
+```
+
+Which reference genomes are frequently used?
+```{r}
+# For bwa?
+bwa_jobs <- all_jobs %>% mutate(tool_name=tool_names) %>% 
+  filter(str_detect(tool_name, "bwa"))
+bwa_jobs$command %>% 
+  str_extract("/mnt/galaxyIndices/[A-Za-z0-9/.-_]+") %>%
+  str_split("/") %>% sapply(function(x) x[length(x)]) %>%
+  table() %>% data.frame() %>% setNames(c("reference", "freq")) %>%
+  arrange(desc(freq))
+
+# For tophat?
+tophat_jobs <- all_jobs %>% mutate(tool_name=tool_names) %>% 
+  filter(str_detect(tool_name, "tophat"))
+tophat_jobs$command %>% 
+  str_extract("/mnt/galaxyIndices/[A-Za-z0-9/.-_]+") %>%
+  str_split("/") %>% sapply(function(x) x[length(x)]) %>%
+  table() %>% data.frame() %>% setNames(c("reference", "freq")) %>%
+  arrange(desc(freq))
 ```
 
 -----
@@ -69,3 +227,4 @@ Jobs run per month.
 ```{r}
 devtools::session_info()
 ```
+
