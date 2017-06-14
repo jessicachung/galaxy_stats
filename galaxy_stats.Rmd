@@ -9,6 +9,8 @@ output:
     toc_depth: 4
 ---
 
+# Setup
+
 ```{r message=FALSE}
 # install.packages("RPostgreSQL")
 # install.packages("lubridate")
@@ -54,6 +56,10 @@ cmd <- paste0("SELECT id, create_time, update_time, history_id, tool_id, ",
 all_jobs <- dbGetQuery(con, cmd)
 ```
 
+-----
+
+# Analysis
+
 ## User analysis
 
 New users per month.
@@ -87,6 +93,8 @@ ggplot(users, aes(x=month)) +
   labs(x="date", y="new users") +
   theme(axis.text.x=element_text(angle=90, hjust=1))
 ```
+
+#### Email domains
 
 Analysis of email suffixes.
 
@@ -218,6 +226,8 @@ top_tool_df <- tool_names %>% table %>% data.frame %>%
   setNames(c("tool", "freq")) %>% arrange(desc(freq))
 top_tool_df %>% head(20)
 ```
+
+## Reference analysis
 
 Which reference genomes are frequently used?
 ```{r}
