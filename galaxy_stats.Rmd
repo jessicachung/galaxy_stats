@@ -1,16 +1,24 @@
 ---
 title: "Galaxy Stats"
-output: html_document
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: 
+      collapsed: true
+    toc_depth: 4
 ---
 
-```{r}
+```{r message=FALSE}
 # install.packages("RPostgreSQL")
 # install.packages("lubridate")
-library("RPostgreSQL")
-library("dplyr")
-library("stringr")
-library("lubridate")
-library("ggplot2")
+# install.packages("openxlsx")
+library(RPostgreSQL)
+library(dplyr)
+library(stringr)
+library(lubridate)
+library(ggplot2)
+library(openxlsx)
 ```
 
 ```{r}
@@ -23,7 +31,7 @@ Load driver and create a connection.
 
 ```{r}
 drv <- dbDriver("PostgreSQL")
-con <- dbConnect(drv, dbname = "galaxy", host = "localhost", port = 5930,
+con <- dbConnect(drv, dbname = "galaxy", host = "localhost", port = 5950,
                  user = "ubuntu")
 ````
 
@@ -56,9 +64,11 @@ users <- users %>%
   mutate(month=year_month(create_time))
 
 # Get number of new users per year-month
-users %>%
+users_by_month <- users %>%
   group_by(month) %>% 
   summarize(n=n())
+
+users_by_month %>% tail(12)
 ```
 
 ```{r include=FALSE}
@@ -74,7 +84,8 @@ users %>%
 ```{r}
 ggplot(users, aes(x=month)) + 
   geom_bar(alpha=0.8) +
-  labs(x="date", y="new users")
+  labs(x="date", y="new users") +
+  theme(axis.text.x=element_text(angle=90, hjust=1))
 ```
 
 Analysis of email suffixes.
@@ -82,27 +93,30 @@ Analysis of email suffixes.
 ```{r}
 # Most common domains
 email_suffixes <- users$email %>% str_split("@") %>% sapply(function(x) x[2])
-email_suffixes %>% table %>% 
+email_suffix_df <- email_suffixes %>% table %>% 
   data.frame %>% setNames(c("domain", "freq")) %>%
-  arrange(desc(freq)) %>% head(20)
+  arrange(desc(freq))
+email_suffix_df %>% head(10)
 ```
 
 ```{r}
 # Country codes
 country_codes <- email_suffixes %>% str_split("\\.") %>% 
   sapply(function(x) {x[length(x)]})
-country_codes %>% table %>% 
+country_code_df <- country_codes %>% table %>% 
   data.frame %>% setNames(c("country_codes", "freq")) %>%
-  arrange(desc(freq)) %>% head(10)
+  arrange(desc(freq))
+country_code_df %>% head(10)
 ```
 
 ```{r}
 # edu domains
 edu_addresses <- email_suffixes %>% str_split("\\.") %>% 
   sapply(function(x) {"edu" %in% x}) %>% email_suffixes[.]
-edu_addresses %>% table %>% 
+edu_address_df <- edu_addresses %>% table %>% 
   data.frame %>% setNames(c("domain", "freq")) %>%
-  arrange(desc(freq)) %>% head(20)
+  arrange(desc(freq))
+edu_address_df %>% head(10)
 ```
 
 ## Job analysis
@@ -120,12 +134,14 @@ all_jobs <- all_jobs %>% mutate(ok_date=create_time > earliest_user)
 
 # Filter out bad dates
 jobs <- all_jobs %>% filter(ok_date)
+not_ok <- all_jobs %>% filter(! ok_date)
 
 # How many dates are ok vs not ok?
 all_jobs$ok_date %>% table
 ```
 
 ```{r include=FALSE, eval=FALSE}
+# Using Galaxy-tut database:
 # Why are there dates that are before the earliest created user?
 # Are these jobs uniformly distributed or is there a pattern?
 ggplot(all_jobs, aes(x=id, y=ok_date)) + geom_point(size=0.1)
@@ -163,9 +179,11 @@ jobs <- jobs %>%
   mutate(month=year_month(create_time))
 
 # Get number of jobs run per year-month
-jobs %>%
+jobs_by_month <- jobs %>%
   group_by(month) %>% 
   summarize(n=n())
+
+jobs_by_month %>% tail(20)
 ```
 
 ```{r include=FALSE}
@@ -181,7 +199,8 @@ jobs %>%
 ```{r}
 ggplot(jobs, aes(x=month)) + 
   geom_bar(alpha=0.8) +
-  labs(x="date", y="number of jobs")
+  labs(x="date", y="number of jobs") +
+  theme(axis.text.x=element_text(angle=90, hjust=1))
 ```
 
 ## Tool analysis
@@ -195,29 +214,60 @@ tool_data <- all_tool_ids %>% str_split("/")
 tool_names <- sapply(tool_data, function(x) {ifelse(length(x) == 1, x, x[5])})
 
 # Top 20 used tools
-tool_names %>% table %>% data.frame %>% setNames(c("tool", "freq")) %>%
-  arrange(desc(freq)) %>% head(20)
+top_tool_df <- tool_names %>% table %>% data.frame %>% 
+  setNames(c("tool", "freq")) %>% arrange(desc(freq))
+top_tool_df %>% head(20)
 ```
 
 Which reference genomes are frequently used?
 ```{r}
-# For bwa?
-bwa_jobs <- all_jobs %>% mutate(tool_name=tool_names) %>% 
-  filter(str_detect(tool_name, "bwa"))
-bwa_jobs$command %>% 
+# From DNA alignment tools (bwa? bowtie?)
+dna_jobs <- all_jobs %>% mutate(tool_name=tool_names) %>% 
+  filter(str_detect(tool_name, "bwa|bowtie"))
+dna_ref_df <- dna_jobs$command %>% 
   str_extract("/mnt/galaxyIndices/[A-Za-z0-9/.-_]+") %>%
   str_split("/") %>% sapply(function(x) x[length(x)]) %>%
+  str_replace(".fa$", "") %>%
   table() %>% data.frame() %>% setNames(c("reference", "freq")) %>%
   arrange(desc(freq))
+dna_ref_df
+```
 
-# For tophat?
-tophat_jobs <- all_jobs %>% mutate(tool_name=tool_names) %>% 
-  filter(str_detect(tool_name, "tophat"))
-tophat_jobs$command %>% 
+```{r}
+# From RNA alignment tools (tophat? hisat?)
+rna_jobs <- all_jobs %>% mutate(tool_name=tool_names) %>% 
+  filter(str_detect(tool_name, "tophat|hisat"))
+rna_ref_df <- rna_jobs$command %>% 
   str_extract("/mnt/galaxyIndices/[A-Za-z0-9/.-_]+") %>%
   str_split("/") %>% sapply(function(x) x[length(x)]) %>%
+  str_replace(".fa$", "") %>%
   table() %>% data.frame() %>% setNames(c("reference", "freq")) %>%
   arrange(desc(freq))
+rna_ref_df
+```
+
+-----
+
+# Write to file
+
+```{r}
+# Merge users per month and jobs per month to a single dataframe
+monthly_stats <- merge(users_by_month %>% rename(new_users=n),
+                       jobs_by_month %>% rename(new_jobs=n),
+                       by="month") %>%
+  arrange(month)
+```
+
+```{r}
+output_list <- list("Monthly stats" = monthly_stats,
+                    "Email - suffixes" = email_suffix_df,
+                    "Email - countries" = country_code_df,
+                    "Email - edu addresses" = edu_address_df,
+                    "Tools" = top_tool_df,
+                    "Reference - DNA" = dna_ref_df,
+                    "Reference - RNA" = rna_ref_df
+                    )
+write.xlsx(output_list, file = "galaxy_stats.xlsx")
 ```
 
 -----
