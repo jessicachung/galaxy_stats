@@ -33,8 +33,8 @@ Load driver and create a connection.
 
 ```{r}
 drv <- dbDriver("PostgreSQL")
-con <- dbConnect(drv, dbname = "galaxy", host = "localhost", port = 5950,
-                 user = "ubuntu")
+con <- dbConnect(drv, dbname = "mel-backup", host = "localhost", port = 5950,
+                 user = "galaxy")
 ````
 
 ## Get data
@@ -43,7 +43,7 @@ Get and store user data.
 
 ```{r}
 # dbGetQuery(con, "SELECT * FROM galaxy_user LIMIT 5;")
-users <- dbGetQuery(con, "SELECT * FROM galaxy_user;") %>% 
+all_users <- dbGetQuery(con, "SELECT * FROM galaxy_user;") %>% 
   select(id:email, username, disk_usage)
 ```
 
@@ -51,9 +51,33 @@ Get and store job data.
 
 ```{r}
 # dbGetQuery(con, "SELECT * FROM job LIMIT 5;")
-cmd <- paste0("SELECT id, create_time, update_time, history_id, tool_id, ",
+cmd <- paste0("SELECT id, create_time, history_id, tool_id, ",
               "tool_version, state, command_line FROM job;")
 all_jobs <- dbGetQuery(con, cmd)
+```
+
+Get and store dataset data.
+
+```{r}
+# dbGetQuery(con, "SELECT * FROM dataset LIMIT 5;")
+cmd <- paste0("SELECT id, create_time, total_size FROM dataset;")
+all_datasets <- dbGetQuery(con, cmd)
+```
+
+Get and store workflow data.
+
+```{r}
+# dbGetQuery(con, "SELECT * FROM workflow LIMIT 5;")
+cmd <- paste0("SELECT id, create_time FROM workflow;")
+all_workflows <- dbGetQuery(con, cmd)
+```
+
+
+```{r include=FALSE, eval=FALSE}
+# How much memory is being used to store the dataframes?
+# Not much. Less than 20 MB per data frame.
+sapply(c("all_users", "all_jobs", "all_datasets", "all_workflows"), function(x){
+  object.size(get(x)) %>% format(units = "MB")})
 ```
 
 -----
@@ -66,7 +90,7 @@ New users per month.
 
 ```{r}
 # Create new column with year-month
-users <- users %>% 
+users <- all_users %>% 
   mutate(month=year_month(create_time))
 
 # Get number of new users per year-month
@@ -191,7 +215,7 @@ jobs_by_month <- jobs %>%
   group_by(month) %>% 
   summarize(n=n())
 
-jobs_by_month %>% tail(20)
+jobs_by_month %>% tail(12)
 ```
 
 ```{r include=FALSE}
@@ -256,16 +280,98 @@ rna_ref_df <- rna_jobs$command %>%
 rna_ref_df
 ```
 
+## Dataset analysis
+
+How many new datasets created per month?
+
+```{r}
+# Create new column with year-month
+datasets <- all_datasets %>% 
+  mutate(month=year_month(create_time))
+
+# Get number of datasets run per year-month
+datasets_by_month <- datasets %>%
+  group_by(month) %>% 
+  summarize(n=n())
+
+datasets_by_month %>% tail(12)
+```
+
+```{r}
+ggplot(datasets, aes(x=month)) + 
+  geom_bar(alpha=0.8) +
+  labs(x="date", y="new datasets") +
+  theme(axis.text.x=element_text(angle=90, hjust=1))
+```
+
+Total size of newly created datasets per month.
+
+```{r}
+dataset_sizes_by_month <- datasets %>%
+  group_by(month) %>% 
+  summarize(size_in_bytes=sum(total_size, na.rm=TRUE)) %>%
+  mutate(size_in_gb=round(size_in_bytes/(2^30), digits=0))
+
+dataset_sizes_by_month %>% tail(12)
+```
+
+## Workflow analysis
+
+How many new workflows created per month?
+
+```{r}
+# Create new column with year-month
+workflows <- all_workflows %>% 
+  mutate(month=year_month(create_time))
+
+# Get number of workflows created per year-month
+workflows_by_month <- workflows %>%
+  group_by(month) %>% 
+  summarize(n=n())
+
+workflows_by_month %>% tail(12)
+```
+
+```{r}
+ggplot(workflows, aes(x=month)) + 
+  geom_bar(alpha=0.8) +
+  labs(x="date", y="new workflows") +
+  theme(axis.text.x=element_text(angle=90, hjust=1))
+```
+
 -----
 
 # Write to file
 
 ```{r}
-# Merge users per month and jobs per month to a single dataframe
-monthly_stats <- merge(users_by_month %>% rename(new_users=n),
-                       jobs_by_month %>% rename(new_jobs=n),
-                       by="month") %>%
+# Merge users, jobs, datasets, workflows per month to a single dataframe
+monthly_stats <- 
+  merge(users_by_month %>% rename(new_users=n),
+        jobs_by_month %>% rename(new_jobs=n),
+        all=TRUE, by="month") %>%
+  merge(datasets_by_month %>% rename(new_datasets=n),
+        all=TRUE, by="month") %>%
+  merge(dataset_sizes_by_month %>% select(-size_in_bytes) %>%
+          rename(new_datasets_gb=size_in_gb),
+        all=TRUE, by="month") %>%
+  merge(workflows_by_month %>% rename(new_workflows=n),
+        all=TRUE, by="month") %>%
   arrange(month)
+```
+
+```{r include=FALSE, eval=FALSE}
+# May have some NA values for zero counts
+monthly_stats
+```
+
+```{r}
+# Replace any NA values with zero
+monthly_stats[is.na(monthly_stats)] <- 0
+```
+
+```{r}
+write.table(monthly_stats, file="monthly_stats.tsv",
+            quote=FALSE, sep="\t", row.names=FALSE)
 ```
 
 ```{r}
@@ -277,7 +383,7 @@ output_list <- list("Monthly stats" = monthly_stats,
                     "Reference - DNA" = dna_ref_df,
                     "Reference - RNA" = rna_ref_df
                     )
-write.xlsx(output_list, file = "galaxy_stats.xlsx")
+write.xlsx(output_list, file="galaxy_stats.xlsx")
 ```
 
 -----
