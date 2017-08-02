@@ -15,10 +15,12 @@ output:
 # install.packages("RPostgreSQL")
 # install.packages("lubridate")
 # install.packages("openxlsx")
+# install.packages("purrr")
 library(RPostgreSQL)
 library(dplyr)
 library(stringr)
 library(lubridate)
+library(purrr)
 library(ggplot2)
 library(openxlsx)
 ```
@@ -27,6 +29,13 @@ library(openxlsx)
 year_month <- function(date) {
   return(sprintf("%d-%02d", year(date), month(date)))
 }
+```
+
+Get current year and month.
+
+```{r}
+current_year_month <- year_month(Sys.Date())
+previous_year_month <- year_month(Sys.Date() - months(1))
 ```
 
 Load driver and create a connection.
@@ -254,6 +263,9 @@ top_tool_df %>% head(20)
 ## Reference analysis
 
 Which reference genomes are frequently used?
+
+For DNA alignment?
+
 ```{r}
 # From DNA alignment tools (bwa? bowtie?)
 dna_jobs <- all_jobs %>% mutate(tool_name=tool_names) %>% 
@@ -267,6 +279,8 @@ dna_ref_df <- dna_jobs$command %>%
 dna_ref_df
 ```
 
+For RNA alignment?
+
 ```{r}
 # From RNA alignment tools (tophat? hisat?)
 rna_jobs <- all_jobs %>% mutate(tool_name=tool_names) %>% 
@@ -278,6 +292,19 @@ rna_ref_df <- rna_jobs$command %>%
   table() %>% data.frame() %>% setNames(c("reference", "freq")) %>%
   arrange(desc(freq))
 rna_ref_df
+```
+
+Across all jobs?
+
+```{r}
+# Get only the first instance of the string match
+all_ref_df <- all_jobs$command %>%
+  str_extract("/mnt/galaxyIndices/genomes/[A-Za-z0-9]+") %>%
+  .[!is.na(.)] %>%
+  str_replace("/mnt/galaxyIndices/genomes/","") %>% 
+  table() %>% data.frame() %>% setNames(c("reference", "freq")) %>%
+  arrange(desc(freq))
+all_ref_df
 ```
 
 ## Dataset analysis
@@ -341,7 +368,105 @@ ggplot(workflows, aes(x=month)) +
 
 -----
 
-# Write to file
+# Files for RDS
+
+Get data for the RDS Genomics dashboard in the format described in the emails.
+
+## month_stat-item_stat-data
+
+Columns: month, stat_item, stat_data, description  
+Rows: workflow, job, datasets_created, datasets_created_storage
+
+```{r}
+df1 <- workflows_by_month %>%
+  mutate(stat_item="workflow",
+         stat_data=n,
+         description=map2_chr(stat_item, month, function(x, y) {
+           sprintf("Number of %s created for month %s", x, y)
+         })) %>%
+  select(month, stat_item, stat_data, description)
+
+df2 <- jobs_by_month %>%
+  mutate(stat_item="job",
+         stat_data=n,
+         description=map2_chr(stat_item, month, function(x, y) {
+           sprintf("Number of %s executed for month %s", x, y)
+         })) %>%
+  select(month, stat_item, stat_data, description)
+
+df3 <- datasets_by_month %>%
+  mutate(stat_item="dataset_uploaded",
+         stat_data=n,
+         description=map2_chr(stat_item, month, function(x, y) {
+           sprintf("Number of %s for month %s", x, y)
+         })) %>%
+  select(month, stat_item, stat_data, description)
+
+df4 <- dataset_sizes_by_month %>%
+  mutate(stat_item="dataset_uploaded_storage",
+         stat_data=size_in_gb,
+         description=map2_chr(stat_item, month, function(x, y) {
+           sprintf("On-disk size of %s in gigabytes for month %s", x, y)
+         })) %>%
+  select(month, stat_item, stat_data, description)
+
+stat_output <- rbind(df1, df2, df3, df4) %>%
+  filter(month != current_year_month) %>%
+  arrange(desc(month))
+```
+
+## month_email-domain_count
+
+Columns: month, email_domain, count, description  
+Description: "Number of users with the email_domain for month YYYY-MM"
+
+```{r}
+email_output <- email_suffix_df %>% 
+  mutate(month=previous_year_month,
+         email_domain=domain,
+         count=freq,
+         description=map_chr(month, function(x) {
+           paste("Number of users with the email_domain at the end of", x)
+         })) %>%
+  select(month:description)
+```
+
+## month_tool_count
+
+Columns: month, tool, count, description  
+Description: "Number of tool usage for month YYYY-MM"
+
+```{r}
+tool_output <- top_tool_df %>%
+  mutate(month=last_year_month,
+         count=freq,
+         description=map_chr(month, function(x) {
+           paste("Number of instances of tool usage at the end of", x)
+         })) %>%
+  select(month, tool, count, description)
+```
+
+## month_reference-genome_count
+
+Columns: month, reference_genome, count, description  
+Description: "Number of times the reference_genome is used for month YYYY-MM"
+
+```{r}
+ref_output <- merge(dna_ref_df, rna_ref_df, by="reference", all=TRUE) %>%
+  mutate(month=previous_year_month,
+         reference_genome=reference,
+         count=map2_int(freq.x, freq.y, sum, na.rm=TRUE),
+         description=map_chr(month, function(x) {
+           paste("Number of times the the reference_genome has been used",
+                 "in common alignment tools at the end of", x)
+         })) %>%
+  select(month, reference_genome, count, description) %>%
+  arrange(desc(count))
+```
+
+-----
+
+# Other output files
 
 ```{r}
 # Merge users, jobs, datasets, workflows per month to a single dataframe
@@ -368,6 +493,25 @@ monthly_stats
 # Replace any NA values with zero
 monthly_stats[is.na(monthly_stats)] <- 0
 ```
+
+-----
+
+# Write to files
+
+## RDS files
+
+```{r}
+write.table(stat_output, file="month_stat-item_stat-data.tsv",
+            quote=FALSE, sep="\t", row.names=FALSE)
+write.table(email_output, file="month_email-domain_count.tsv",
+            quote=FALSE, sep="\t", row.names=FALSE)
+write.table(tool_output, file="month_tool_count.tsv",
+            quote=FALSE, sep="\t", row.names=FALSE)
+write.table(ref_output, file="month_reference-genome_count.tsv",
+            quote=FALSE, sep="\t", row.names=FALSE)
+```
+
+## Other files
 
 ```{r}
 write.table(monthly_stats, file="monthly_stats.tsv",
