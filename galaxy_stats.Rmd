@@ -438,7 +438,7 @@ Description: "Number of tool usage for month YYYY-MM"
 
 ```{r}
 tool_output <- top_tool_df %>%
-  mutate(month=last_year_month,
+  mutate(month=previous_year_month,
          count=freq,
          description=map_chr(month, function(x) {
            paste("Number of instances of tool usage at the end of", x)
@@ -452,13 +452,13 @@ Columns: month, reference_genome, count, description
 Description: "Number of times the reference_genome is used for month YYYY-MM"
 
 ```{r}
-ref_output <- merge(dna_ref_df, rna_ref_df, by="reference", all=TRUE) %>%
+ref_output <- all_ref_df %>%
   mutate(month=previous_year_month,
          reference_genome=reference,
-         count=map2_int(freq.x, freq.y, sum, na.rm=TRUE),
+         count=freq,
          description=map_chr(month, function(x) {
            paste("Number of times the the reference_genome has been used",
-                 "in common alignment tools at the end of", x)
+                 "at the end of", x)
          })) %>%
   select(month, reference_genome, count, description) %>%
   arrange(desc(count))
