@@ -37,6 +37,6 @@ export OS_USERNAME=""
 export OS_PASSWORD=""
 
 # Upload to object store
-swift upload galaxy-mel-backups ${BACKUP}.gz
+swift --quiet upload galaxy-mel-backups ${BACKUP}.gz
 
 echo "[$(date --iso-8601=seconds)] Finished backup" >> ${LOG}

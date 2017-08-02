@@ -32,14 +32,14 @@ export OS_USERNAME=""
 export OS_PASSWORD=""
 
 # Download from object store
-swift download galaxy-mel-backups ${BACKUP}.gz
+swift --quiet download galaxy-mel-backups ${BACKUP}.gz
 
 # Create a new database
 createdb -p 5950 -U galaxy mel-backup
 
 # Import database
 zcat ${BACKUP}.gz | psql postgres://galaxy@localhost:5950/mel-backup \
-    > import.log 2>&1
+    > /dev/null 2>&1
 
 echo "[$(date --iso-8601=seconds)] Starting analysis" >> ${LOG}
 
