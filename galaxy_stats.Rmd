@@ -76,8 +76,8 @@ all_datasets <- dbGetQuery(con, cmd)
 Get and store workflow data.
 
 ```{r}
-# dbGetQuery(con, "SELECT * FROM workflow LIMIT 5;")
-cmd <- paste0("SELECT id, create_time FROM workflow;")
+# dbGetQuery(con, "SELECT * FROM stored_workflow LIMIT 5;")
+cmd <- paste0("SELECT id, create_time FROM stored_workflow;")
 all_workflows <- dbGetQuery(con, cmd)
 ```
 
