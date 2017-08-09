@@ -46,4 +46,4 @@ dbExistsTable(con, "galaxy_user")
 dbGetQuery(con, "SELECT * FROM galaxy_user LIMIT 10;")
 ```
 
-Analysis notebook: [galaxy_stats.Rmd]()
+Analysis notebook: [galaxy_stats.Rmd](galaxy_stats.Rmd)
