@@ -250,8 +250,8 @@ Which tools are used most often?
 
 ```{r}
 # Using all jobs across all dates
-all_tool_ids <- all_jobs$tool_id
-tool_data <- all_tool_ids %>% str_split("/")
+tool_ids <- jobs$tool_id
+tool_data <- tool_ids %>% str_split("/")
 tool_names <- sapply(tool_data, function(x) {ifelse(length(x) == 1, x, x[5])})
 
 # Top 20 used tools
@@ -268,7 +268,7 @@ For DNA alignment?
 
 ```{r}
 # From DNA alignment tools (bwa? bowtie?)
-dna_jobs <- all_jobs %>% mutate(tool_name=tool_names) %>% 
+dna_jobs <- jobs %>% mutate(tool_name=tool_names) %>% 
   filter(str_detect(tool_name, "bwa|bowtie"))
 dna_ref_df <- dna_jobs$command %>% 
   str_extract("/mnt/galaxyIndices/[A-Za-z0-9/.-_]+") %>%
@@ -283,7 +283,7 @@ For RNA alignment?
 
 ```{r}
 # From RNA alignment tools (tophat? hisat?)
-rna_jobs <- all_jobs %>% mutate(tool_name=tool_names) %>% 
+rna_jobs <- jobs %>% mutate(tool_name=tool_names) %>% 
   filter(str_detect(tool_name, "tophat|hisat"))
 rna_ref_df <- rna_jobs$command %>% 
   str_extract("/mnt/galaxyIndices/[A-Za-z0-9/.-_]+") %>%
@@ -298,7 +298,7 @@ Across all jobs?
 
 ```{r}
 # Get only the first instance of the string match
-all_ref_df <- all_jobs$command %>%
+all_ref_df <- jobs$command %>%
   str_extract("/mnt/galaxyIndices/genomes/[A-Za-z0-9]+") %>%
   .[!is.na(.)] %>%
   str_replace("/mnt/galaxyIndices/genomes/","") %>% 
@@ -382,7 +382,7 @@ df1 <- workflows_by_month %>%
   mutate(stat_item="workflow",
          stat_data=n,
          description=map2_chr(stat_item, month, function(x, y) {
-           sprintf("Number of %s created for month %s", x, y)
+           sprintf("Number of %ss created for month %s", x, y)
          })) %>%
   select(month, stat_item, stat_data, description)
 
@@ -390,12 +390,12 @@ df2 <- jobs_by_month %>%
   mutate(stat_item="job",
          stat_data=n,
          description=map2_chr(stat_item, month, function(x, y) {
-           sprintf("Number of %s executed for month %s", x, y)
+           sprintf("Number of %ss executed for month %s", x, y)
          })) %>%
   select(month, stat_item, stat_data, description)
 
 df3 <- datasets_by_month %>%
-  mutate(stat_item="dataset_uploaded",
+  mutate(stat_item="datasets_created",
          stat_data=n,
          description=map2_chr(stat_item, month, function(x, y) {
            sprintf("Number of %s for month %s", x, y)
@@ -403,7 +403,7 @@ df3 <- datasets_by_month %>%
   select(month, stat_item, stat_data, description)
 
 df4 <- dataset_sizes_by_month %>%
-  mutate(stat_item="dataset_uploaded_storage",
+  mutate(stat_item="datasets_created_storage",
          stat_data=size_in_gb,
          description=map2_chr(stat_item, month, function(x, y) {
            sprintf("On-disk size of %s in gigabytes for month %s", x, y)
@@ -421,14 +421,23 @@ Columns: month, email_domain, count, description
 Description: "Number of users with the email_domain for month YYYY-MM"
 
 ```{r}
-email_output <- email_suffix_df %>% 
-  mutate(month=previous_year_month,
-         email_domain=domain,
-         count=freq,
+email_suffix_by_month <- users %>%
+  mutate(suffix=email %>% str_split("@") %>% sapply(function(x) x[2])) %>%
+  group_by(month, suffix) %>%
+  summarise(n=n()) %>% 
+  filter(month != current_year_month) %>%
+  arrange(month, suffix)
+```
+
+
+```{r}
+email_output <- email_suffix_by_month %>% 
+  mutate(email_domain=suffix,
+         count=n,
          description=map_chr(month, function(x) {
-           paste("Number of users with the email_domain at the end of", x)
+           paste("Number of new users with the email_domain for", x)
          })) %>%
-  select(month:description)
+  select(month, email_domain, count, description)
 ```
 
 ## month_tool_count
@@ -437,11 +446,19 @@ Columns: month, tool, count, description
 Description: "Number of tool usage for month YYYY-MM"
 
 ```{r}
-tool_output <- top_tool_df %>%
-  mutate(month=previous_year_month,
-         count=freq,
+stopifnot(length(jobs$month) == length(tool_names))
+tool_by_month <- data.frame(month=jobs$month, tool=tool_names) %>%
+  group_by(month, tool) %>%
+  summarise(n=n()) %>%
+  filter(month != current_year_month) %>%
+  arrange(month, tool)
+```
+
+```{r}
+tool_output <- tool_by_month %>%
+  mutate(count=n,
          description=map_chr(month, function(x) {
-           paste("Number of instances of tool usage at the end of", x)
+           paste("Number of instances of tool usage for the month of", x)
          })) %>%
   select(month, tool, count, description)
 ```
@@ -452,16 +469,27 @@ Columns: month, reference_genome, count, description
 Description: "Number of times the reference_genome is used for month YYYY-MM"
 
 ```{r}
-ref_output <- all_ref_df %>%
-  mutate(month=previous_year_month,
-         reference_genome=reference,
-         count=freq,
+ref_by_month <- jobs %>% 
+  mutate(genome=command_line %>% 
+           str_extract("/mnt/galaxyIndices/genomes/[A-Za-z0-9]+")) %>%
+  filter(! is.na(genome)) %>%
+  mutate(genome=str_replace(genome, "/mnt/galaxyIndices/genomes/", "")) %>% 
+  select(month, genome) %>%
+  group_by(month, genome) %>%
+  summarise(n=n()) %>%
+  arrange(month, genome)
+```
+
+
+```{r}
+ref_output <- ref_by_month %>%
+  mutate(reference_genome=genome,
+         count=n,
          description=map_chr(month, function(x) {
-           paste("Number of times the the reference_genome has been used",
-                 "at the end of", x)
+           paste("Number of times the reference_genome was used for",
+                 "the month of", x)
          })) %>%
-  select(month, reference_genome, count, description) %>%
-  arrange(desc(count))
+  select(month, reference_genome, count, description)
 ```
 
 -----
