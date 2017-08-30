@@ -26,7 +26,9 @@ pg_dump \
 gzip ${BACKUP}
 
 # Activate virtualenv for swift
+set +o nounset
 source venv/bin/activate
+set -o nounset
 
 # OS credentials
 export OS_AUTH_URL=https://keystone.rc.nectar.org.au:5000/v2.0/

@@ -2,7 +2,7 @@
 # Import Galaxy database from Nectar object storage and output stats
 # 
 # # Before running, setup directory
-# mkdir /mnt/transient_nfs/
+# cd /mnt/transient_nfs/
 # git clone https://github.com/jessicachung/galaxy_stats.git
 # cd galaxy_stats
 # virtualenv venv
@@ -10,7 +10,7 @@
 # pip install python-swiftclient
 # pip install python-keystoneclient
 
-set -eo pipefail
+set -euo pipefail
 
 cd /mnt/transient_nfs/galaxy_stats
 
@@ -21,7 +21,9 @@ LOG=galaxy_analysis.log
 echo "[$(date --iso-8601=seconds)] Downloading and importing database" >> ${LOG}
 
 # Activate virtualenv for swift
+set +o nounset
 source venv/bin/activate
+set -o nounset
 
 # OS credentials
 export OS_AUTH_URL=https://keystone.rc.nectar.org.au:5000/v2.0/
@@ -44,7 +46,7 @@ zcat ${BACKUP}.gz | psql postgres://galaxy@localhost:5950/mel-backup \
 echo "[$(date --iso-8601=seconds)] Starting analysis" >> ${LOG}
 
 # Render R notebook
-Rscript -e "dir <- paste0('/mnt/galaxy/home/jess/public_html/galaxy_mel_', as.character(Sys.Date())); rmarkdown::render('galaxy_stats.Rmd', output_dir=dir, knit_root_dir=dir, quiet=TRUE)" > /dev/null 2>&1
+Rscript -e "dir <- paste0('/mnt/galaxy/home/mel/public_html/galaxy_mel_', as.character(Sys.Date())); rmarkdown::render('galaxy_stats.Rmd', output_dir=dir, knit_root_dir=dir, quiet=TRUE)" > /dev/null 2>&1
 
 # Remove galaxy database
 dropdb -p 5950 -U galaxy mel-backup
